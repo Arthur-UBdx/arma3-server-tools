@@ -3,12 +3,12 @@ import subprocess
 import sys
 import os
 import shutil
+import re
 
-## PARAMETERS
+APP_ID = "107410"
 STEAMCMD_PATH = "steamcmd"
-WORKSHOP_PATH=f"{os.environ['HOME']}/Steam/steamapps/workshop/content/107410"
+WORKSHOP_PATH=f"{os.environ['HOME']}/Steam/steamapps/workshop/content/{APP_ID}"
 ARMA_PATH=f"{os.environ['HOME']}/Steam/steamapps/common/Arma 3 Server"
-## ----------
 
 def try_index(l: list, i: int):
     if type(l) != list or type(i) != int: raise TypeError("l should be a list and i an integer")
@@ -33,20 +33,16 @@ class ModList:
     def __init__(self, mods: List[Mod]=[]):
         self.mods = mods
         
-    def __str__(self):
-        return [mod.__str__() for mod in self.mods].__str__()
+    def __str__(self): return [mod.__str__() for mod in self.mods].__str__()
+    def __iter__(self): return self.mods.__iter__()
+    def __len__(self): return self.mods.__len__()
+    def names(self): return [mod.name for mod in self.mods]
+    def ids(self): return [mod.id for mod in self.mods]
     
-    def __iter__(self):
-        return self.mods.__iter__()
-    
-    def __len__(self):
-        return self.mods.__len__()
-        
-    def names(self):
-        return [mod.name for mod in self.mods]
-    
-    def ids(self):
-        return [mod.id for mod in self.mods]
+    def find(self, id: str) -> Mod :
+        for mod in self.mods:
+            if mod.id == id: return mod
+        return None
     
 
 class SteamCMDProcess:
@@ -61,7 +57,6 @@ class SteamCMDProcess:
         return steamcmd
         
     def wait(self, print_stdout: bool) -> int:
-        print("\n")
         last_line = ""
         line = ""
         while True:
@@ -70,22 +65,43 @@ class SteamCMDProcess:
             if not line:
                 break
             if print_stdout: print(line.strip())
-        print("\n")
         return int("ERROR!" in last_line) # return 0 if ok, 1 if error since steamcmd process always returns 0 even if there is an error
+    
+    def wait_and_report_failures(self, print_stdout: bool) -> List[int]:
+        failed_mod_ids: List[str] = [] 
+        line = ''
+        while True:
+            line = self.steamcmd.stdout.readline()
+            if not line:
+                break
+            if print_stdout: print(line.strip())
+            match_error = re.search(r"ERROR! Download item ([1-9]+) failed", line)
+            print(match_error)#debug
+            print("\n")#debug
+            
+            if match_error: failed_mod_ids.append(match_error.group(1))
+            
+        return failed_mod_ids
+
 
 class SteamCMD:
     def whoami():
         print(f"$STEAMCMD_USR: {os.environ.get('STEAMCMD_USR')}\n$STEAMCMD_PWD: {os.environ.get('STEAMCMD_PWD')}")
         sys.exit(0)
         
-    def download_mods(mods: ModList) -> List[Tuple[str, str]]:
-        failed_downloads = []
+    def download_mods(mods: ModList) -> ModList:
+        if try_index(sys.argv, 2) in ["-sg", "--steamguard"]: steamguard_code = try_index(sys.argv, 3)
+        else: steamguard_code = ""
+        
+        command = f"+login {SteamCMD._get_username()} {SteamCMD._get_password()} {steamguard_code}"
+        print("Downloading: ")
         for mod in mods:
-            print(f"\nDownloading {mod.name}, id={mod.id}")
-            command = f"+login {os.environ['STEAMCMD_USR']} {os.environ['STEAMCMD_PWD']} +workshop_download_item 107410 {mod.id}"
-            exit_code = SteamCMDProcess(command).wait(print_stdout=True)
-            if bool(exit_code): failed_downloads.append(mod)
-        return ModList(failed_downloads)
+            print(f"\t-{mod.name}{' '*(50-mod.name.__len__())}| id={mod.id}")
+            command += f"+workshop_download_item {APP_ID} {mod.id} "
+        print("\n")
+        failed_downloads = SteamCMDProcess(command).wait_and_report_failures(True)
+        print(failed_downloads)
+        return ModList([mods.find(id) for id in failed_downloads])
             
     def install_mods(mods: ModList):
         for mod in mods:
@@ -95,6 +111,16 @@ class SteamCMD:
             ModFiles.sanitize_subfolders(f"{WORKSHOP_PATH}/{mod.id}")
             if os.path.exists(destination) : shutil.rmtree(destination)
             shutil.copytree(source, destination)
+            
+    def _get_username():
+        usr = os.environ.get("STEAMCMD_USR", None)
+        if not usr: raise ValueError("Error: Username not specified in STEAMCMD_USR", file=sys.stderr)
+        return usr
+    
+    def _get_password():
+        pwd = os.environ.get("STEAMCMD_PWD", None)
+        if not pwd: raise ValueError("Error: Password not specified in STEAMCMD_USR", file=sys.stderr)
+        return pwd
 
 
 class Arma3ModpackFile:
@@ -175,7 +201,8 @@ def usage():
     Usage:
           --help/-h : Show this help message
           
-          --install/-i <modpack.html> : Install mods from exported arma3 modpack file (.html)
+          --install/-i <modpack.html> [-sg/--steamguard] [steamguard code] : Install mods from exported arma3 modpack file (.html)
+                                          -> Optional: -sg to enter the steamguard code if the account needs it for login
           --params/-p <modpack.html> <config name> [-s] : Generate params file for arma 3 server,
                                           -> Optional: -s to use as a server-side only modpack 
           
