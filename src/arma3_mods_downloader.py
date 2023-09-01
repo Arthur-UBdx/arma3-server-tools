@@ -48,28 +48,14 @@ class ModList:
     
 
 class SteamCMDProcess:
-    def __init__(self, arguments: str):
-        self.steamcmd = subprocess.Popen(["steamcmd", arguments, "+quit"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    def __init__(self, arguments: list):
+        arguments = ["steamcmd"] + arguments + ["+quit"]
+        self.steamcmd = subprocess.Popen(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     
     def __del__(self):
         self.steamcmd.kill()
     
-    def run_and_wait(arguments: str) -> int:
-        steamcmd = subprocess.Popen(["steamcmd", arguments, "+quit"]).wait()
-        return steamcmd
-        
-    def wait(self, print_stdout: bool) -> int:
-        last_line = ""
-        line = ""
-        while True:
-            last_line = line
-            line = self.steamcmd.stdout.readline()
-            if not line:
-                break
-            if print_stdout: print(line.strip())
-        return int("ERROR!" in last_line) # return 0 if ok, 1 if error since steamcmd process always returns 0 even if there is an error
-    
-    def wait_and_report_failures(self, print_stdout: bool) -> List[int]:
+    def wait(self, print_stdout: bool) -> List[int]:
         failed_mod_ids: List[str] = [] 
         line = ''
         while True:
@@ -82,7 +68,6 @@ class SteamCMDProcess:
             if match_login_error: raise ValueError(f"Error when logging in to steam: {match_login_error.group(1)}")
             
             match_dl_error = re.search(r"ERROR! Download item ([0-9]+)", line)
-            print(f"{match_dl_error}\n")
             if match_dl_error: failed_mod_ids.append(match_dl_error.group(1))
             
         return failed_mod_ids
@@ -92,18 +77,16 @@ class SteamCMD:
     def download_mods(mods: ModList) -> ModList:
         username = try_index(sys.argv, 3)
         password = try_index(sys.argv, 4)
+        steamguard_code = try_index(sys.argv, 5)
         
-        if try_index(sys.argv, 5) in ["-sg", "--steamguard"]: steamguard_code = try_index(sys.argv, 6)
-        else: steamguard_code = ""
-        
-        command = f"+login {username} {password} {steamguard_code}"
+        command = ["+login", username, password, steamguard_code]
         print(f"Connecting to {username} using steamguard code {steamguard_code}")
         print("Downloading: ")
         for mod in mods:
             print(f"\t-{mod.name}{' '*(50-mod.name.__len__())}| id={mod.id}")
-            command += f"+workshop_download_item {APP_ID} {mod.id} "
+            command += ["+workshop_download_item", APP_ID, mod.id]
         print("\n")
-        failed_downloads = SteamCMDProcess(command).wait_and_report_failures(True)
+        failed_downloads = SteamCMDProcess(command).wait(True)
         print(failed_downloads)
         return ModList([mods.find(id) for id in failed_downloads])
             
@@ -114,15 +97,15 @@ class SteamCMD:
             destination = f"{ARMA_PATH}/mods/@{mod.name}"
             ModFiles.sanitize_subfolders(source)
             if os.path.exists(destination) : shutil.rmtree(destination)
-            shutil.copytree(source, destination)
+            shutil.move(source, destination)
             
     def maunal_install(mods: ModList) -> ModList:
         mods_not_found = []
         for mod in mods:
-            print(f"Installing: {mod.name}")
-            source = f"{WORKSHOP_PATH}/{mod.id}"
-            destination = f"{ARMA_PATH}/mods/@{mod.name}"
-            if not os.path.isfile(source): 
+            print(f"\nInstalling: {mod.name}")
+            source = f"{WORKSHOP_PATH}/{mod.id}/"
+            destination = f"{ARMA_PATH}/mods/@{mod.name}/"
+            if not os.path.exists(source): 
                 print(f"Mod files of {mod.name} not found in '{source}'")
                 mods_not_found.append(mod)
                 continue
@@ -205,7 +188,7 @@ def manual_install_mods():
     mods: ModList = Arma3ModpackFile(sys.argv[2]).parse()
     mods_not_found = SteamCMD.maunal_install(mods)
     if mods_not_found:
-        print(f"{mods_not_found.__len__()} out of {mods.__len__()} folder were not found, the list is in ./failed_manual_install.json")
+        print(f"{mods_not_found.__len__()} out of {mods.__len__()} mod folder(s) were not found, the list is in ./failed_manual_install.json")
         log_failed_operations("./failed_manual_install.json", mods_not_found)
     sys.exit(0)
     
@@ -220,14 +203,14 @@ def usage():
     Usage:
           --help/-h : Show this help message
           
-          --install/-i <modpack.html> <username> <password> [-sg/--steamguard] [steamguard code] : Downloads and install mods from exported arma3 modpack file (.html)
+          --install/-i <modpack.html> <username> <password> [steamguard code] : Downloads and install mods from exported arma3 modpack file (.html)
                                           -> Required: <username> & <password>: Steam username & password
-                                          -> Optional: -sg to enter the steamguard code if the account needs it for login
+                                          -> Optional: [steamguard code]
                                           
           --manual-install/-mi <modpack.html> : Install manually downloaded mods from a exported arma3 modpack file (.html), will look for the files in the default steamcmd installation folder 
           
           --params/-p <modpack.html> <config name> [-s] : Generate params file for arma 3 server,
-                                          -> Optional: -s to use as a server-side only modpack 
+                                          -> Optional: -s to use as a server-side only modpack
           """)
     sys.exit(0)
     
@@ -243,6 +226,7 @@ def bad_arg():
 def main():
     argv_map: dict = {"--help": usage, "-h":usage,
                       "--install": install_mods, "-i":install_mods,
+                      "--manual-install": manual_install_mods, "-mi": manual_install_mods,
                       "--params": generate_params, "-p":generate_params,
                       }
     if sys.argv.__len__() == 1: fn = usage
