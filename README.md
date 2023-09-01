@@ -1,6 +1,6 @@
 # ARMA 3 MODS DOWNLOADER
 
-Quick python CLI I made to download, install and generate params files for Arma 3 Server mods,
+Quick python CLI I made to download, install and generate params files for Arma 3 Server mods.
 Only works on linux for the moment.
 
 ```bash
