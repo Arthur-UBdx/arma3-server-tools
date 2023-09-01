@@ -75,7 +75,7 @@ class SteamCMDProcess:
             if not line:
                 break
             if print_stdout: print(line.strip())
-            match_error = re.search(r"ERROR! Download item ([1-9]+) failed", line)
+            match_error = re.search(r"ERROR! Download item ([0-9]+) failed", line)
             print(match_error)#debug
             print("\n")#debug
             
