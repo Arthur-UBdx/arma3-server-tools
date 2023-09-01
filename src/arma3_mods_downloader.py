@@ -5,10 +5,12 @@ import os
 import shutil
 import re
 
+
 APP_ID = "107410"
 STEAMCMD_PATH = "steamcmd"
 WORKSHOP_PATH=f"{os.environ['HOME']}/Steam/steamapps/workshop/content/{APP_ID}"
 ARMA_PATH=f"{os.environ['HOME']}/Steam/steamapps/common/Arma 3 Server"
+
 
 def try_index(l: list, i: int):
     if type(l) != list or type(i) != int: raise TypeError("l should be a list and i an integer")
@@ -75,25 +77,27 @@ class SteamCMDProcess:
             if not line:
                 break
             if print_stdout: print(line.strip())
-            match_error = re.search(r"ERROR! Download item ([0-9]+) failed", line)
-            print(match_error)#debug
-            print("\n")#debug
             
-            if match_error: failed_mod_ids.append(match_error.group(1))
+            match_login_error = re.search(r"Logging in user '.+' to Steam Public\.\.\.FAILED \((.+)\)", line)
+            if match_login_error: raise ValueError(f"Error when logging in to steam: {match_login_error.group(1)}")
+            
+            match_dl_error = re.search(r"ERROR! Download item ([0-9]+)", line)
+            print(f"{match_dl_error}\n")
+            if match_dl_error: failed_mod_ids.append(match_dl_error.group(1))
             
         return failed_mod_ids
 
 
 class SteamCMD:
-    def whoami():
-        print(f"$STEAMCMD_USR: {os.environ.get('STEAMCMD_USR')}\n$STEAMCMD_PWD: {os.environ.get('STEAMCMD_PWD')}")
-        sys.exit(0)
-        
     def download_mods(mods: ModList) -> ModList:
-        if try_index(sys.argv, 2) in ["-sg", "--steamguard"]: steamguard_code = try_index(sys.argv, 3)
+        username = try_index(sys.argv, 3)
+        password = try_index(sys.argv, 4)
+        
+        if try_index(sys.argv, 5) in ["-sg", "--steamguard"]: steamguard_code = try_index(sys.argv, 6)
         else: steamguard_code = ""
         
-        command = f"+login {SteamCMD._get_username()} {SteamCMD._get_password()} {steamguard_code}"
+        command = f"+login {username} {password} {steamguard_code}"
+        print(f"Connecting to {username} using steamguard code {steamguard_code}")
         print("Downloading: ")
         for mod in mods:
             print(f"\t-{mod.name}{' '*(50-mod.name.__len__())}| id={mod.id}")
@@ -108,19 +112,24 @@ class SteamCMD:
             print(f"Installing: {mod.name}")
             source = f"{WORKSHOP_PATH}/{mod.id}"
             destination = f"{ARMA_PATH}/mods/@{mod.name}"
-            ModFiles.sanitize_subfolders(f"{WORKSHOP_PATH}/{mod.id}")
+            ModFiles.sanitize_subfolders(source)
             if os.path.exists(destination) : shutil.rmtree(destination)
             shutil.copytree(source, destination)
             
-    def _get_username():
-        usr = os.environ.get("STEAMCMD_USR", None)
-        if not usr: raise ValueError("Error: Username not specified in STEAMCMD_USR", file=sys.stderr)
-        return usr
-    
-    def _get_password():
-        pwd = os.environ.get("STEAMCMD_PWD", None)
-        if not pwd: raise ValueError("Error: Password not specified in STEAMCMD_USR", file=sys.stderr)
-        return pwd
+    def maunal_install(mods: ModList) -> ModList:
+        mods_not_found = []
+        for mod in mods:
+            print(f"Installing: {mod.name}")
+            source = f"{WORKSHOP_PATH}/{mod.id}"
+            destination = f"{ARMA_PATH}/mods/@{mod.name}"
+            if not os.path.isfile(source): 
+                print(f"Mod files of {mod.name} not found in '{source}'")
+                mods_not_found.append(mod)
+                continue
+            ModFiles.sanitize_subfolders(source)
+            if os.path.exists(destination) : shutil.rmtree(destination)
+            shutil.copytree(source, destination)
+        return ModList(mods_not_found)
 
 
 class Arma3ModpackFile:
@@ -171,22 +180,33 @@ def check_number_of_args(n: int):
     if len(sys.argv) < n+1:
         print(f"Error: Expected {n} arguments, got {len(sys.argv)-1}, --help to show help")
         sys.exit(1)
+        
+def log_failed_operations(filename: str, failed_downloads: ModList):
+    with open(filename, "w") as f:
+        content = "[\n"
+        [content := content + f"\t{mod.__str__()},\n" for mod in failed_downloads]
+        content = content[:-2]
+        content += "\n]"
+        f.write(content)
 
 def install_mods():        
-    check_number_of_args(2)
+    check_number_of_args(4)
     mods: ModList = Arma3ModpackFile(sys.argv[2]).parse()
     failed_downloads = SteamCMD.download_mods(mods)
     succeeded_downloads: ModList = ModList([mod for mod in mods if mod not in failed_downloads])
     SteamCMD.install_mods(succeeded_downloads)
     if failed_downloads:
         print(f"{failed_downloads.__len__()} out of {mods.__len__()} downloads have failed, the list is in ./failed_downloads.json")
-        with open("./failed_downloads.json", "w") as f:
-            content = "[\n"
-            [content := content + f"\t{mod.__str__()},\n" for mod in failed_downloads]
-            content = content[:-2]
-            content += "\n]"
-            f.write(content)
-        
+        log_failed_operations("./failed_downloads.json", failed_downloads)
+    sys.exit(0)
+    
+def manual_install_mods():
+    check_number_of_args(2)
+    mods: ModList = Arma3ModpackFile(sys.argv[2]).parse()
+    mods_not_found = SteamCMD.maunal_install(mods)
+    if mods_not_found:
+        print(f"{mods_not_found.__len__()} out of {mods.__len__()} folder were not found, the list is in ./failed_manual_install.json")
+        log_failed_operations("./failed_manual_install.json", mods_not_found)
     sys.exit(0)
     
 def generate_params():
@@ -194,19 +214,20 @@ def generate_params():
     mods: ModList = Arma3ModpackFile(sys.argv[2]).parse()
     ServerConfigFile.generate_params_file(mods, sys.argv[3], try_index(sys.argv, 4) == "-s")
     sys.exit(0)
-    
 
 def usage():
     print("""
     Usage:
           --help/-h : Show this help message
           
-          --install/-i <modpack.html> [-sg/--steamguard] [steamguard code] : Install mods from exported arma3 modpack file (.html)
+          --install/-i <modpack.html> <username> <password> [-sg/--steamguard] [steamguard code] : Downloads and install mods from exported arma3 modpack file (.html)
+                                          -> Required: <username> & <password>: Steam username & password
                                           -> Optional: -sg to enter the steamguard code if the account needs it for login
+                                          
+          --manual-install/-mi <modpack.html> : Install manually downloaded mods from a exported arma3 modpack file (.html), will look for the files in the default steamcmd installation folder 
+          
           --params/-p <modpack.html> <config name> [-s] : Generate params file for arma 3 server,
                                           -> Optional: -s to use as a server-side only modpack 
-          
-          --whoami/-w : See the current username and password (stored in env vars STEAMCMD_USR and STEAMCMD_PWD)
           """)
     sys.exit(0)
     
@@ -223,9 +244,7 @@ def main():
     argv_map: dict = {"--help": usage, "-h":usage,
                       "--install": install_mods, "-i":install_mods,
                       "--params": generate_params, "-p":generate_params,
-                      "--whoami": SteamCMD.whoami, "-w": SteamCMD.whoami,
                       }
-    # check_number_of_args(1)
     if sys.argv.__len__() == 1: fn = usage
     else : fn: callable = argv_map.get(sys.argv[1], bad_arg)
     fn()
