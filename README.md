@@ -15,6 +15,6 @@ There are parameters at the start of the script file, default values are:
     ARMA_PATH=f"{os.environ['HOME']}/arma3server"
 ```
 
-## `start.py` - Server start script
+## `start.sh` - Server start script
 
-Python script to start an Arma 3 server with mods and params files.
+Bash script to start an Arma 3 server with mods and params files.
