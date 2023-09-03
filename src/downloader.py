@@ -9,7 +9,7 @@ import re
 APP_ID = "107410"
 STEAMCMD_PATH = "steamcmd"
 WORKSHOP_PATH=f"{os.environ['HOME']}/Steam/steamapps/workshop/content/{APP_ID}"
-ARMA_PATH=f"{os.environ['HOME']}/Steam/steamapps/common/Arma 3 Server"
+ARMA_PATH=f"{os.environ['HOME']}/arma3server"
 
 
 def try_index(l: list, i: int):
