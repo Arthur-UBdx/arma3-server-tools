@@ -30,7 +30,7 @@ start_server() {
         echo "Config $config does not exist, --list to list all available configs"
         exit 1
     fi
-    "$path/arma3server" "$path/configs/$config.txt"
+    "$path/arma3server" par="$path/configs/$config.txt"
 }
 
 main() {
